@@ -111,3 +111,51 @@ la configuración. Esta fase no acredita generación del cliente, migración de 
 base ni un build completo. El validador WASM no accede a la base ni sustituye esas
 operaciones. Las entradas de Functions y los archivos de React se entregan en sus
 fases respectivas.
+
+## Fase 2: backend implementado y comprobado
+
+El bloqueo anterior de descarga dejó de reproducirse: el CLI validó el esquema,
+generó el cliente y aplicó la migración inicial a un PostgreSQL 17 aislado local.
+La compilación estricta de API, contratos y entradas Netlify pasó con Node 20.
+Se comprobó el flujo HTTP real contra esa base: login/CSRF, roles, contactos,
+etiquetas, segmentos, previsualización, lanzamiento idempotente, dos trabajadores
+concurrentes, DRY_RUN sin acceso a Graph, respuestas HOLA, firma del webhook, BAJA
+antes de confirmar el callback, importación que conserva bajas, estados fuera de
+orden y métricas. No se enviaron mensajes reales ni se verificó un despliegue en
+Netlify. Las pruebas Vitest de entrega siguen previstas para la fase 4.
+
+Los comandos disponibles son `npm run build:backend` y `npm run queue:once`.
+El segundo ejecuta un lote local, respetando las mismas barreras del cron; no se
+expone una ruta HTTP para disparar el trabajador. La autenticación de desarrollo
+carga el `.env` de la raíz del proyecto incluso desde el workspace de la API.
+En producción los valores se leen directamente de las variables de Netlify.
+El administrador inicial se crea una sola vez desde las variables BOOTSTRAP;
+no hay registro público ni credenciales predeterminadas.
+
+Las listas se conservan como contactos y etiquetas; los segmentos son filtros
+reutilizables. No es necesario cargar un CSV para agregar contactos o lanzar
+otra campaña. Cada campaña congela hasta 10,000 destinatarios al lanzarla;
+se vuelve a comprobar permiso antes de cada intento. No repite la campaña
+indefinidamente ni incorpora contactos futuros a una campaña ya lanzada.
+Los operadores pueden gestionar carteras y campañas; la conexión, bot, límites
+y creación de usuarios requieren rol ADMIN. Los números no se cambian sobre un
+contacto existente para evitar reutilizar un consentimiento concedido a otro
+número. Se crea otro contacto con su autorización correspondiente.
+
+La normalización usa libphonenumber, sin insertar un 1 mexicano por defecto.
+La importación solo acepta CSV y necesita nombre, telefono, consentimiento,
+fecha; las autorizaciones afirmativas también necesitan fuente. Opcionales:
+etiquetas separadas por `|` y campos con prefijo `campo_`. Fechas ISO con zona.
+Una fila inválida rechaza el archivo completo. Referencias existentes por número
+se omiten sin alterar permisos. Las claves de campos personalizados son acotadas;
+los filtros se convierten a expresiones de Prisma, nunca SQL manual.
+
+Se admiten plantillas con variables numéricas consecutivas en el cuerpo y
+componentes estáticos compatibles. Los formatos no compatibles se muestran como
+tales y no se envían. No se crean plantillas ficticias como aprobadas en la
+aplicación: la sincronización consulta Meta. El trabajador refresca plantillas
+usadas que superen diez minutos de antigüedad antes de un envío real y verifica
+el número/calidad. Un resultado UNKNOWN no tiene botón de reintento automático.
+El límite efectivo por minuto es el menor entre espacio y variable del servidor.
+Los cron y callbacks son idempotentes y conservan estado durable; ninguna API
+puede retirar un mensaje que ya esté en vuelo hacia Meta.

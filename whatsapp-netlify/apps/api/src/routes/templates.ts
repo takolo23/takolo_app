@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { paginationSchema } from "@takolo/shared";
+import { db } from "../config/db.js";
+import { asyncRoute } from "../http/errors.js";
+import { admin, identity } from "../middleware/auth.js";
+import { syncTemplates } from "../services/templates.js";
+import { audit } from "../services/audit.js";
+export const templateRoutes = Router();
+templateRoutes.get("/", asyncRoute(async (req, res) => { const q = paginationSchema.parse(req.query); const where = { workspaceId: identity(req).workspaceId, name: { contains: q.search, mode: "insensitive" as const } }; const [total, templates] = await db.$transaction([db.template.count({ where }), db.template.findMany({ where, take: q.pageSize, skip: (q.page - 1) * q.pageSize, orderBy: { name: "asc" } })]); res.json({ templates, total, page: q.page, pageSize: q.pageSize }); }));
+templateRoutes.post("/sync", admin, asyncRoute(async (req, res) => { const actor = identity(req); const result = await syncTemplates(actor.workspaceId); await audit(actor, "TEMPLATES_SYNCED", "template", undefined, result); res.json(result); }));

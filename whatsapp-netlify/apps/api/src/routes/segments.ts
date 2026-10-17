@@ -1,0 +1,15 @@
+import { Router } from "express";
+import { z } from "zod";
+import { segmentSchema, idSchema, paginationSchema } from "@takolo/shared";
+import { db, serial } from "../config/db.js";
+import { asyncRoute, AppError } from "../http/errors.js";
+import { identity } from "../middleware/auth.js";
+import { audit } from "../services/audit.js";
+import { checkSegmentTags, loadSegment, segmentWhere } from "../services/segments.js";
+export const segmentRoutes = Router();
+segmentRoutes.get("/tags", asyncRoute(async (req, res) => { res.json(await db.tag.findMany({ where: { workspaceId: identity(req).workspaceId }, orderBy: { name: "asc" }, take: 500 })); }));
+segmentRoutes.post("/tags", asyncRoute(async (req, res) => { const input = z.object({ name: z.string().trim().min(1).max(80) }).strict().parse(req.body); const actor = identity(req); const tag = await db.tag.upsert({ where: { workspaceId_name: { workspaceId: actor.workspaceId, name: input.name } }, create: { workspaceId: actor.workspaceId, name: input.name }, update: {} }); res.status(201).json(tag); }));
+segmentRoutes.get("/", asyncRoute(async (req, res) => { const q = paginationSchema.parse(req.query); const where = { workspaceId: identity(req).workspaceId, name: { contains: q.search, mode: "insensitive" as const } }; const [total, segments] = await db.$transaction([db.segment.count({ where }), db.segment.findMany({ where, orderBy: { name: "asc" }, skip: (q.page - 1) * q.pageSize, take: q.pageSize })]); res.json({ segments, total, page: q.page, pageSize: q.pageSize }); }));
+segmentRoutes.post("/", asyncRoute(async (req, res) => { const input = segmentSchema.parse(req.body); const actor = identity(req); const result = await serial(async tx => { await checkSegmentTags(actor.workspaceId, input.filters, tx); const created = await tx.segment.create({ data: { workspaceId: actor.workspaceId, ...input } }); await audit(actor, "SEGMENT_CREATED", "segment", created.id, {}, tx); return created; }); res.status(201).json(result); }));
+segmentRoutes.get("/:id", asyncRoute(async (req, res) => { const id = idSchema.parse(req.params.id); const actor = identity(req); const segment = await loadSegment(actor.workspaceId, id); const where = segmentWhere(actor.workspaceId, segment.filters); const [total, contacts] = await db.$transaction([db.contact.count({ where }), db.contact.findMany({ where, take: 20, orderBy: { id: "asc" } })]); res.json({ ...segment, total, contacts }); }));
+segmentRoutes.put("/:id", asyncRoute(async (req, res) => { const id = idSchema.parse(req.params.id); const input = segmentSchema.parse(req.body); const actor = identity(req); const result = await serial(async tx => { await checkSegmentTags(actor.workspaceId, input.filters, tx); if (!await tx.segment.findUnique({ where: { workspaceId_id: { workspaceId: actor.workspaceId, id } } })) throw new AppError(404, "No se encontró el segmento."); const updated = await tx.segment.update({ where: { workspaceId_id: { workspaceId: actor.workspaceId, id } }, data: input }); await audit(actor, "SEGMENT_UPDATED", "segment", id, {}, tx); return updated; }); res.json(result); }));

@@ -26,7 +26,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "db:validate:wasm": "node scripts/validate-schema.mjs"
+    "db:validate:wasm": "node scripts/validate-schema.mjs",
+    "build:backend": "npm run db:generate && npm run build -w @takolo/shared && npm run build -w @takolo/api && tsc -p tsconfig.functions.json",
+    "queue:once": "tsx apps/api/src/queue-once.ts"
   },
   "devDependencies": {
     "@netlify/functions": "5.3.0",

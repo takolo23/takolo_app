@@ -14,7 +14,7 @@
   },
   "packageManager": "npm@10.9.9",
   "scripts": {
-    "build": "npm run db:generate && npm run build -w @takolo/shared && npm run build -w @takolo/api && npm run build -w @takolo/web",
+    "build": "npm run build:backend && npm run build -w @takolo/web",
     "dev:api": "npm run build -w @takolo/shared && npm run dev -w @takolo/api",
     "dev:web": "npm run build -w @takolo/shared && npm run dev -w @takolo/web",
     "db:validate": "prisma validate",
@@ -22,7 +22,7 @@
     "db:generate": "prisma generate",
     "db:deploy": "prisma migrate deploy",
     "db:migrate": "prisma migrate dev",
-    "typecheck": "npm run build -w @takolo/shared && npm run typecheck -w @takolo/api && npm run typecheck -w @takolo/web",
+    "typecheck": "npm run build -w @takolo/shared && npm run typecheck -w @takolo/api && npm run typecheck -w @takolo/web && tsc -p tsconfig.functions.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

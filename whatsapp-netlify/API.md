@@ -63,7 +63,7 @@ de la plantilla aprobada. Un doble lanzamiento devuelve 409 y no duplica mensaje
 
 GET/POST `/api/webhooks/whatsapp` usan el token de verificación y firma HMAC de
 Meta, respectivamente. POST verifica X-Hub-Signature-256 sobre bytes originales,
-incluso al invocarse mediante el adaptador de Netlify. Los eventos se guardan
+incluso al invocarse mediante el adaptador Request/Response de Netlify API v2. Los eventos se guardan
 antes del 200. Las bajas se aplican en el callback; el resto se procesa en cola.
 HOLA/MENU solo genera una respuesta para un contacto autorizado y dentro de
 24 horas, con enfriamiento configurable. BAJA/STOP no genera una respuesta.

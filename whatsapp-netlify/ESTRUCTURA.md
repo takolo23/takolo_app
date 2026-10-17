@@ -159,3 +159,50 @@ el número/calidad. Un resultado UNKNOWN no tiene botón de reintento automátic
 El límite efectivo por minuto es el menor entre espacio y variable del servidor.
 Los cron y callbacks son idempotentes y conservan estado durable; ninguna API
 puede retirar un mensaje que ya esté en vuelo hacia Meta.
+
+## Fase 3: panel implementado y comprobado
+
+El usuario indicó «Continúa» mientras se terminaba el backend y autorizó avanzar
+al panel. React/Vite/Tailwind está implementado en español, con el estilo oscuro,
+azul y morado. Incluye acceso, resumen, alta manual de contactos, CSV opcional,
+etiquetas y campos, segmentos guardados, plantillas, campañas con previsualización,
+programación/pausa/cancelación, historial de intentos, bandeja, auditoría,
+configuración de ritmo y bot, y creación de usuarios por la administración.
+
+No se requiere un Excel para registrar contactos, usar listas existentes o volver
+a programar campañas. El panel no inserta un prefijo 1 a teléfonos mexicanos.
+Las claves de Meta se muestran solo como configuradas/pendientes, nunca sus valores.
+El indicador de modo se actualiza cuando cambia la configuración. La activación
+real sigue requiriendo DRY_RUN=false en el alojamiento y modo real en el espacio;
+las simulaciones existentes no se convierten a mensajes reales.
+
+Pasó `npm run build` completo: generación Prisma, contratos, API, typecheck de
+Functions y frontend de producción. En Chromium, con PostgreSQL aislado y solo
+fixtures, se comprobó acceso, alta manual autorizada con campos, segmento por
+etiqueta, vista previa, campaña simulada, persistencia del bot, historial, bandeja,
+auditoría y móvil a 390px sin desbordes del viewport. No se observaron errores de
+JavaScript ni respuestas HTTP 500. El recorrido detectó y permitió corregir un
+payload de bot que incluía campos de solo lectura. Se verificó también el HMAC
+sobre bytes UTF-8 con evento Netlify base64 y las dos variantes de ruta de la API.
+
+Las capturas en `/workspace/.setup/capturas/netlify` son datos ficticios de pruebas,
+no evidencia de entregas a teléfonos reales. No se desplegó esta nueva aplicación
+en Netlify ni se habilitaron envíos reales. Las pruebas Vitest y el README/guía de
+Meta-Netlify siguen pendientes de la fase 4, esperando el siguiente «continúa».
+
+### Empaquetado de Netlify
+
+La comprobación con el empaquetador oficial detectó que las entradas heredadas
+CommonJS rompían `import.meta` del cliente generado por Prisma. Se corrigieron
+`api.ts` y `queue.ts` a la API v2 de Netlify (export default Request/Response),
+que conserva módulos ES. `api.ts` sigue usando Express y serverless-http mediante
+un adaptador explícito: conserva bytes del cuerpo, query strings, estados,
+encabezados y cookies. No depende de un flag experimental de empaquetado.
+
+Se empaquetaron ambas funciones con `@netlify/zip-it-and-ship-it` oficial, target
+Node 20 y las dependencias externas de netlify.toml. Se detectó API v2 para ambas
+y cron cada minuto para queue, sin advertencias de formato. El artefacto empacado
+se ejecutó en Node 20 contra un PostgreSQL recién creado: migración, bootstrap,
+login, cookie __Host con Secure (detectando runtime Lambda aun si NODE_ENV se
+omite o se configura mal), CSRF, alta manual y webhook firmado con texto UTF-8.
+Es una validación local del paquete; no acredita despliegue o entregas reales.

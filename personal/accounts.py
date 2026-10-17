@@ -8,19 +8,7 @@ from flask import g, has_request_context, session
 from werkzeug.security import generate_password_hash
 
 
-class Connection(sqlite3.Connection):
-    def __exit__(self, *args):
-        try:
-            return super().__exit__(*args)
-        finally:
-            self.close()
-
-
-def connect(path):
-    connection = sqlite3.connect(str(path), timeout=15, factory=Connection)
-    connection.row_factory = sqlite3.Row
-    connection.execute('PRAGMA foreign_keys=ON')
-    return connection
+from .storage import connect, protect_local
 
 
 class Accounts:
@@ -38,7 +26,7 @@ class Accounts:
             CREATE TABLE IF NOT EXISTS phone_bindings (
                 account_id TEXT PRIMARY KEY REFERENCES accounts(id), phone_id TEXT UNIQUE NOT NULL);
             ''')
-        self.path.chmod(0o600)
+        protect_local(self.path)
         # Retain any pre-existing personal workspace under a documented login.
         with connect(self.root / 'personal.sqlite3') as legacy, connect(self.path) as identities:
             old = legacy.execute('SELECT * FROM owner WHERE id=1').fetchone()
@@ -91,7 +79,7 @@ class Accounts:
             with connect(self.root / filename) as workspace:
                 self.initialize(workspace)
                 workspace.execute('INSERT INTO owner VALUES (1,?,?)', (name[:100], password_hash))
-            (self.root / filename).chmod(0o600)
+            protect_local(self.root / filename)
         return self.by_id(identity)
 
     def throttled(self, bucket):
@@ -105,4 +93,4 @@ class Accounts:
 
     def all(self, active_only=False):
         with connect(self.path) as db:
-            return db.execute('SELECT * FROM accounts' + (' WHERE active=1' if active_only else '') + ' ORDER BY rowid').fetchall()
+            return db.execute('SELECT * FROM accounts' + (' WHERE active=1' if active_only else '') + ' ORDER BY username').fetchall()

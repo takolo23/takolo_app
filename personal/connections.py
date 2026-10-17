@@ -1,5 +1,7 @@
 """Encrypted per-workspace credentials. No account inherits another account's keys."""
 import json
+import base64
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -13,6 +15,11 @@ SECRET_FIELDS = {'META_ACCESS_TOKEN','META_APP_SECRET','META_VERIFY_TOKEN'}
 
 
 def cipher_for(root):
+    secret = os.environ.get('TAKOLO_ENCRYPTION_SECRET')
+    if secret:
+        return Fernet(base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest()))
+    if os.environ.get('DATABASE_URL'):
+        raise RuntimeError('Falta la clave persistente de cifrado.')
     path = Path(root) / 'connections.key'
     if not path.exists():
         with tempfile.NamedTemporaryFile(dir=root, delete=False) as temp:

@@ -49,17 +49,15 @@ Consulta [Mensajes y despliegue web](MENSAJES-Y-DESPLIEGUE.md). El modo inicial 
 
 ## Almacenamiento y respaldo
 
-La carpeta definida por `PERSONAL_DATA_DIR`, por defecto `/workspace/.personal-app`, contiene:
+La aplicación admite dos modos:
 
-- `accounts.sqlite3`: identidades, contraseñas con hash, roles, estados y asociación exclusiva de los números.
-- `personal.sqlite3`: cartera del primer administrador o espacio personal anterior conservado.
-- `workspace-<id>.sqlite3`: base independiente de cada usuario posterior, con clientes, pagos, archivos temporales, autorizaciones, mensajes y conexión cifrada.
-- `session.key`: firma de las sesiones.
-- `connections.key`: clave maestra del cifrado de conexiones. Perderla impide recuperar las credenciales cifradas.
+**Desarrollo local sin `DATABASE_URL`:** usa SQLite dentro de `PERSONAL_DATA_DIR`, con identidades en `accounts.sqlite3`, la primera cartera en `personal.sqlite3` y otras carteras en `workspace-<id>.sqlite3`. Las claves están en `session.key` y `connections.key`. Respalda el conjunto completo de forma privada con web y trabajador detenidos. La migración de la versión personal conserva su usuario `principal` y su contraseña anterior.
 
-Conserva **toda la carpeta** en un volumen persistente y realiza respaldos privados. Para un respaldo completo coherente entre cuentas, detén web y trabajador y copia la carpeta completa incluyendo ambas claves. No copies solo una base de cartera. Para restaurar, detén los procesos y restaura el conjunto completo. No subas bases ni claves a GitHub ni las envíes por chat.
+**Alojamiento gratuito con `DATABASE_URL`:** usa PostgreSQL externo. Cada espacio ocupa un esquema generado por el servidor y las identidades otro esquema independiente. El disco de Render es temporal; no se usa para conservar los datos. `TAKOLO_SESSION_SECRET` y `TAKOLO_ENCRYPTION_SECRET` son secretos estables del alojamiento y deben conservarse junto con los respaldos PostgreSQL. No los regeneres si ya existen conexiones cifradas. Los archivos temporales locales pueden desaparecer sin perder las cuentas, los pagos o las conexiones.
 
-La migración conserva el espacio personal anterior, si existía, bajo el usuario `principal` y la contraseña anterior. No elimina clientes, pagos ni historial. Si la plataforma ya tenía identidades, no crea otra cuenta por la presencia de la tabla histórica. Las conexiones nuevas se configuran por cuenta; no se reparten credenciales del servidor.
+`TAKOLO_REQUIRE_REMOTE_DB=1` impide arrancar si falta la base externa; no hay una caída silenciosa a SQLite temporal. Si existen datos previos en SQLite, configurarle otra base no los migra automáticamente: hay que preparar una migración y respaldo antes de cambiar el almacenamiento. La instancia de alojamiento aún no tenía cuentas creadas.
+
+Las conexiones remotas PostgreSQL verifican el certificado y el nombre del servidor por TLS. Solo las instancias de prueba aisladas en loopback permiten comunicación local sin TLS. No subas bases, claves ni `DATABASE_URL` a GitHub ni al chat.
 
 ## Verificación
 
@@ -68,8 +66,18 @@ cd /workspace/takolo_app
 /workspace/.setup/personal/bin/python -m unittest discover -s personal/tests -v
 ```
 
-39 pruebas verifican cartera, autenticación, pagos, importaciones, exportación, simulaciones, firmas y estados de WhatsApp, aislamiento entre cuentas, credenciales cifradas, roles, suspensión y migración. Los resultados de Meta son fixtures simulados: no se verificó un envío real.
+Las pruebas de SQLite verifican cartera, autenticación, pagos, importaciones, exportación, simulaciones, firmas y estados de WhatsApp, aislamiento entre cuentas, credenciales cifradas, roles, suspensión y migración. Sin TAKOLO_PG_TEST_URL se omiten las 9 pruebas de integración PostgreSQL. En esta tarea pasaron 51 pruebas, todas ejecutadas, contra SQLite y PostgreSQL local aislado. Los resultados de Meta son fixtures simulados: no se verificó un envío real.
 
-## Publicación
+## Publicación gratuita
 
-`render.yaml` propone una sola instancia con volumen persistente de 1 GB y HTTPS. El plan con disco puede tener coste. No hay una web pública creada ni una cuenta de alojamiento conectada. La rama de despliegue es `codex/takolo-multiusuario`; selecciónala al conectar el repositorio en el alojamiento. Antes de un lanzamiento público se deben verificar el alojamiento real, respaldos, cuotas/capacidad y los requisitos de la conexión oficial para cada usuario. Publicar el entorno de desarrollo no publica la aplicación en Internet.
+`render.yaml` usa **Render Free sin disco de pago**, con una base PostgreSQL externa (por ejemplo, un proyecto **Neon Free**). Antes de confirmar, revisa que ambos proveedores muestren su plan gratuito; las cuotas y condiciones pueden cambiar. Esta aplicación no contrata servicios ni evita las verificaciones que cada proveedor pueda exigir.
+
+1. Crea un proyecto PostgreSQL gratuito en [Neon](https://console.neon.tech/), preferiblemente dedicado a esta aplicación.
+2. Copia su cadena de conexión en el campo **DATABASE_URL de Render**, nunca en el chat.
+3. En el Blueprint selecciona el repositorio `takolo23/takolo_app`, rama `codex/takolo-multiusuario`, archivo `render.yaml`. Pulsa **Retry** si aún muestra la configuración anterior de pago.
+4. Confirma que el servicio muestre **Free** y que no aparezca un disco persistente de pago. Conserva las claves generadas automáticamente.
+5. Cuando la web esté disponible, crea al administrador con el código generado en `PERSONAL_SETUP_TOKEN` dentro de las variables de Render.
+
+La web gratuita puede dormirse por inactividad y tardar en despertar. El trabajador solo funciona mientras el servicio está activo: **no ofrece envíos de mensajes continuos las 24 horas**. Los datos pendientes quedan en PostgreSQL. Las cuotas gratuitas pueden suspender el servicio al agotarse; no se ha validado una capacidad de producción a gran escala. Las tarifas de WhatsApp son independientes; el envío real sigue apagado.
+
+La configuración está publicada en la rama de despliegue. No se ha creado ni conectado todavía una base Neon real ni se ha comprobado una URL pública del alojamiento. Publicar el entorno de desarrollo no publica la web.

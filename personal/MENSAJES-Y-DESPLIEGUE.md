@@ -54,22 +54,29 @@ No se implementan rotación de números, automatización no oficial de sesiones 
 
 Fuentes oficiales: [Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api/get-started) y [políticas de WhatsApp](https://business.whatsapp.com/policy).
 
-## Alojamiento
+## Alojamiento gratuito
 
-El despliegue propuesto en `render.yaml` usa una instancia web con trabajador en segundo plano y un disco de 1 GB en `/data`. Ambos procesos se supervisan juntos mediante `personal/serve.sh`. La web expone `/healthz`. Se conserva el almacenamiento tras reiniciar el contenedor.
+La propuesta actual en `render.yaml` es **Render Free**, sin disco de pago. Usa `DATABASE_URL` para PostgreSQL externo, como un proyecto Neon Free. La rama es `codex/takolo-multiusuario`. Las cuentas y sus datos ocupan esquemas independientes de PostgreSQL; el almacenamiento local de Render se puede borrar.
 
-Variables globales:
+Variables globales del Blueprint:
 
-- `PERSONAL_DATA_DIR=/data`: carpeta persistente completa.
-- `TAKOLO_TRUST_PROXY=1`: confiar en un único proxy que normalice las cabeceras de dirección y protocolo; usar solo detrás del proxy del alojamiento.
-- `PERSONAL_HTTPS=1`: cookies que solo se envían por HTTPS.
-- `PERSONAL_SETUP_TOKEN`: código privado de activación del primer administrador; el blueprint lo genera.
-- `TAKOLO_REGISTRATION_OPEN=1`: registro público después de crear la administración. Usar `0` para cerrar nuevas altas.
-- `WHATSAPP_SEND_ENABLED=0`: simulaciones por defecto. Solo habilitar después de completar las verificaciones necesarias.
+- `DATABASE_URL`: cadena de conexión que se copia directamente de Neon a Render, sin pasar por el chat. El campo es obligatorio y secreto.
+- `TAKOLO_REQUIRE_REMOTE_DB=1`: impide usar SQLite temporal si falta esa conexión.
+- `TAKOLO_SESSION_SECRET` y `TAKOLO_ENCRYPTION_SECRET`: secretos generados automáticamente que deben mantenerse estables entre reinicios. Conserva también estas claves al respaldar o trasladar la base.
+- `PERSONAL_DATA_DIR=/tmp/takolo`: únicamente espacio de trabajo temporal en este modo.
+- `PERSONAL_HTTPS=1` y `TAKOLO_TRUST_PROXY=1`: cookies HTTPS y confianza en un único proxy normalizado del proveedor.
+- `PERSONAL_SETUP_TOKEN`: código privado generado para el primer administrador.
+- `TAKOLO_REGISTRATION_OPEN=1`: permite registros después de crear la administración.
+- `WHATSAPP_SEND_ENABLED=0`: mantiene los envíos reales apagados.
+- `TAKOLO_FREE_HOSTING=1`: muestra el aviso de disponibilidad limitada.
 
-Las credenciales de cada usuario se introducen en **Mi conexión**, no en variables globales de Meta ni en el chat. El volumen debe conservar `accounts.sqlite3`, todas las bases de los espacios, `session.key` y `connections.key`. Sigue el respaldo completo explicado en README.
+El plan Free puede dormirse por inactividad. El trabajador se pausa con el servicio, por lo que no se garantiza procesamiento o envío automático continuo 24/7. Al volver a arrancar, los pendientes siguen guardados en PostgreSQL; las solicitudes interrumpidas con resultado incierto no se reenvían a ciegas. No se implementan pings para evitar artificialmente el reposo del proveedor.
 
-La plataforma sigue sin alojamiento público ni acceso a una cuenta del proveedor. El manifiesto puede requerir un plan de pago con disco persistente; no se ha contratado. Usa la rama `codex/takolo-multiusuario` y el archivo raíz `render.yaml` al crear el Blueprint. Una publicación real requiere cuenta de alojamiento, fuente accesible al proveedor y validación de HTTPS, permisos, registro, aislamiento, reinicios y respaldos allí. La incorporación automática de clientes de WhatsApp mediante Meta Embedded Signup requiere trabajo y aprobación adicionales; esta versión usa configuración manual.
+Para continuar, crea una base en [Neon](https://console.neon.tech/) eligiendo su plan Free. En Render, revisa o vuelve a cargar el Blueprint, comprueba que diga **Free** y que no incluya disco de pago, y pega la cadena de conexión de Neon en `DATABASE_URL`. El primer acceso requiere el código privado `PERSONAL_SETUP_TOKEN` generado en Render. Si un proveedor exige una verificación adicional o muestra un coste, compruébalo antes de aceptar: no se garantiza ausencia de verificación de tarjeta ni gratuidad fuera de las cuotas vigentes.
+
+No se han creado cuentas externas ni servicios de pago. Los límites y condiciones vigentes de esos proveedores no se pudieron consultar desde la red restringida de este entorno. El despliegue público y una base Neon real siguen pendientes de las cuentas del usuario. Las tarifas de mensajes de Meta son independientes del alojamiento; no se ha enviado ningún mensaje real.
+
+Los datos locales SQLite previos no se copian automáticamente al activar PostgreSQL. Para una instalación existente, prepara primero una migración con respaldo. Esta instalación de alojamiento aún no tenía usuarios creados.
 
 ## Contenedor y pruebas
 
@@ -90,3 +97,18 @@ La CA de construcción no queda incorporada en la imagen. El almacenamiento de p
 ## Validación de la versión multiusuario
 
 Pasaron 39 pruebas automatizadas. En navegador, dos cuentas independientes verificaron registro, permisos de administración, carteras y conexiones separadas, secretos guardados que no se devolvieron al HTML, simulación automática, persistencia después de reiniciar, suspensión que invalida sesiones y vista móvil. La imagen final arrancó reutilizando el volumen de prueba y conservó usuarios, conexión cifrada y mensajes simulados. Los fixtures usaron un volumen independiente y no se añadieron a la plataforma real. No se verificaron un alojamiento público ni envíos reales.
+
+## Verificación de PostgreSQL para el plan gratuito
+
+Se añadieron pruebas con un PostgreSQL real aislado: registro/login, roles, importación y duplicados, pagos e historial, exportaciones, cantidades grandes, aislamiento de cuentas, claves estables al perder archivos locales, simulaciones en segundo plano y pagos concurrentes. También se comprueba el rechazo de una configuración sin base/secretos y la verificación TLS de servidores remotos.
+
+Para ejecutarlas usa solo una base de prueba dedicada llamada `takolo_test` en loopback. La suite borra sus esquemas de prueba; rechaza una conexión remota o con otro nombre. No uses `DATABASE_URL` de producción al ejecutar las pruebas.
+
+```bash
+cd /workspace/takolo_app
+TAKOLO_PG_TEST_URL=postgresql://postgres@127.0.0.1:55432/takolo_test /workspace/.setup/personal/bin/python -m unittest discover -s personal/tests -p test_postgres.py -v
+```
+
+Las pruebas locales no sustituyen la comprobación de TLS, permisos, cuotas y persistencia en una base externa real después de conectarla.
+
+Resultado de esta adaptación: 51 pruebas ejecutadas y aprobadas, incluida la base PostgreSQL real local. La imagen final arrancó con dos cuentas y se comprobó en navegador que borrar la carpeta local y reiniciar conserva usuarios, clientes, mensajes y conexiones cifradas. La prueba incluyó aislamiento, permisos, suspensión de sesiones y vista móvil. No se observó ningún error del servidor ni de JavaScript. Esto no acredita una conexión Neon real ni un despliegue público; ambos siguen pendientes de la cuenta externa del usuario.

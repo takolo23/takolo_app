@@ -1,5 +1,5 @@
-# Deployment proposal: this file does not create or pay for a service.
-# Use "New > Blueprint" with this file's path after publishing the source to GitHub.
+# Free web hosting requires an external persistent PostgreSQL database.
+# Create a free Neon project, then enter its connection string in DATABASE_URL.
 services:
   - type: web
     name: takolo-plataforma
@@ -7,17 +7,21 @@ services:
     branch: codex/takolo-multiusuario
     dockerfilePath: ./Dockerfile.personal
     dockerContext: .
-    plan: starter
+    plan: free
     numInstances: 1
     healthCheckPath: /healthz
     autoDeployTrigger: "off"
-    disk:
-      name: takolo-personal-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
       - key: PERSONAL_DATA_DIR
-        value: /data
+        value: /tmp/takolo
+      - key: DATABASE_URL
+        sync: false
+      - key: TAKOLO_REQUIRE_REMOTE_DB
+        value: "1"
+      - key: TAKOLO_SESSION_SECRET
+        generateValue: true
+      - key: TAKOLO_ENCRYPTION_SECRET
+        generateValue: true
       - key: PERSONAL_HTTPS
         value: "1"
       - key: PERSONAL_SETUP_TOKEN
@@ -27,4 +31,6 @@ services:
       - key: TAKOLO_REGISTRATION_OPEN
         value: "1"
       - key: TAKOLO_TRUST_PROXY
+        value: "1"
+      - key: TAKOLO_FREE_HOSTING
         value: "1"

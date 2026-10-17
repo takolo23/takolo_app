@@ -10,7 +10,7 @@ import re
 import secrets
 import sqlite3
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
 from pathlib import Path
@@ -79,7 +79,7 @@ def create_app(config=None):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
     app.jinja_env.globals['icon'] = icon
     root = Path(os.environ.get('PERSONAL_DATA_DIR', '/workspace/.personal-app'))
-    app.config.update(DATA_DIR=root, MAX_CONTENT_LENGTH=10 * 1024 * 1024,
+    app.config.update(FREE_HOSTING=os.environ.get('TAKOLO_FREE_HOSTING') == '1', DATA_DIR=root, MAX_CONTENT_LENGTH=10 * 1024 * 1024,
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
                       SETUP_TOKEN=os.environ.get('PERSONAL_SETUP_TOKEN', ''),
                       SESSION_COOKIE_SECURE=os.environ.get('PERSONAL_HTTPS') == '1')
@@ -87,6 +87,12 @@ def create_app(config=None):
         app.config.update(config)
     root = Path(app.config['DATA_DIR'])
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.environ.get('DATABASE_URL'):
+        required = ['TAKOLO_SESSION_SECRET','TAKOLO_ENCRYPTION_SECRET']
+        if any(not os.environ.get(name) for name in required):
+            raise RuntimeError('La base remota necesita claves persistentes de sesión y cifrado.')
+        if not app.config.get('SECRET_KEY'):
+            app.config['SECRET_KEY'] = os.environ['TAKOLO_SESSION_SECRET']
     if not app.config.get('SECRET_KEY'):
         key = root / 'session.key'
         try:
@@ -265,7 +271,7 @@ def create_app(config=None):
     @app.get('/')
     @login_required
     def dashboard():
-        stats = db().execute('SELECT COUNT(*) total, COALESCE(SUM(balance_cents),0) balance, SUM(balance_cents>0) active FROM clients').fetchone()
+        stats = db().execute('SELECT COUNT(*) total, COALESCE(SUM(balance_cents),0) balance, SUM(CASE WHEN balance_cents>0 THEN 1 ELSE 0 END) active FROM clients').fetchone()
         collected = db().execute("SELECT COALESCE(SUM(amount_cents),0) FROM events WHERE kind='payment'").fetchone()[0]
         recent = db().execute('SELECT events.*,clients.name FROM events LEFT JOIN clients ON clients.id=events.client_id ORDER BY events.id DESC LIMIT 6').fetchall()
         return render_template('dashboard.html', stats=stats, collected=collected, recent=recent,
@@ -393,7 +399,7 @@ def create_app(config=None):
                     raise ValueError('Las columnas deben tener nombres diferentes.')
                 payload = {'columns': list(frame.columns), 'rows': frame.fillna('').to_dict(orient='records')}
                 stage_id = secrets.token_urlsafe(24)
-                db().execute("DELETE FROM stages WHERE created_at < datetime('now','-1 day')")
+                db().execute("DELETE FROM stages WHERE created_at < ?", ((datetime.now(timezone.utc)-timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'),))
                 db().execute('INSERT INTO stages VALUES (?,?,?,?)', (stage_id, Path(upload.filename).name, json.dumps(payload), now()))
                 db().commit()
                 return redirect(url_for('import_preview', stage_id=stage_id))

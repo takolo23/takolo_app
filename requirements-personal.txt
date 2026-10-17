@@ -4,3 +4,4 @@ openpyxl==3.1.5
 xlrd==2.0.2
 gunicorn==23.0.0
 cryptography==46.0.7
+psycopg[binary]==3.2.13

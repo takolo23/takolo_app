@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{% block title %}Mi espacio{% endblock %} · TAKOLO</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body>
+{% if owner and request.endpoint not in ['login','register','setup'] %}
+<aside class="sidebar">
+<a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-icon">t<span>•</span></span><span>takolo<span class="brand-sub">ESPACIOS</span></span></a>
+<div class="space-label">TU ESPACIO DE TRABAJO</div>
+<nav aria-label="Menú principal">
+<a class="{{ 'selected' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}"><span>{{ icon('grid') }}</span> Resumen</a>
+<a class="{{ 'selected' if request.endpoint in ['clients','client_detail','new_client'] }}" href="{{ url_for('clients') }}"><span>{{ icon('users') }}</span> Mi cartera</a>
+<a class="{{ 'selected' if request.endpoint in ['import_file','import_preview'] }}" href="{{ url_for('import_file') }}"><span>{{ icon('upload') }}</span> Importar cartera</a>
+<a class="{{ 'selected' if request.endpoint == 'history' }}" href="{{ url_for('history') }}"><span>{{ icon('clock') }}</span> Historial</a>
+<a class="{{ 'selected' if request.endpoint and request.endpoint.startswith('messaging.') }}" href="{{ url_for('messaging.index') }}"><span>{{ icon('message') }}</span> Mensajes</a><a class="{{ 'selected' if request.endpoint=='messaging.connection_settings' }}" href="{{ url_for('messaging.connection_settings') }}"><span>{{ icon('message') }}</span> Mi conexión</a>{% if owner.role=='admin' %}<a class="{{ 'selected' if request.endpoint=='admin_users' }}" href="{{ url_for('admin_users') }}"><span>{{ icon('users') }}</span> Usuarios</a>{% endif %}</nav>
+<div class="sidebar-bottom"><div class="private-note"><span class="dot"></span> Espacio independiente<p>Tus clientes y pagos, en orden.</p></div><div class="profile"><span class="avatar">{{ owner.name[:1]|upper }}</span><div><strong>{{ owner.name }}</strong><small>{{ 'Administración' if owner.role=='admin' else 'Mi cuenta' }}</small></div><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" title="Cerrar sesión" aria-label="Cerrar sesión">{{ icon('logout') }}</button></form></div></div>
+</aside>
+<main class="workspace"><header class="topbar"><span>MI ESPACIO <span class="breadcrumb">/ {% block section %}Resumen{% endblock %}</span></span><div class="top-actions"><span class="top-label"><span class="dot"></span> TAKOLO</span><form class="mobile-logout" method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="logout" aria-label="Cerrar sesión" title="Cerrar sesión">{{ icon('logout') }}</button></form></div></header><div class="page">
+{% else %}<main class="auth-layout"><div class="auth-glow"></div>{% endif %}
+{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}" role="alert">{{ message }}</div>{% endfor %}{% endwith %}
+{% block content %}{% endblock %}
+{% if owner and request.endpoint not in ['login','register','setup'] %}<footer>TAKOLO <span>Hecho para llevar tu día con claridad.</span></footer></div>{% endif %}</main>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body></html>

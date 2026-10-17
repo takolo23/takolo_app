@@ -1,0 +1,30 @@
+# Deployment proposal: this file does not create or pay for a service.
+# Use "New > Blueprint" with this file's path after publishing the source to GitHub.
+services:
+  - type: web
+    name: takolo-plataforma
+    runtime: docker
+    branch: codex/takolo-multiusuario
+    dockerfilePath: ./Dockerfile.personal
+    dockerContext: .
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /healthz
+    autoDeployTrigger: "off"
+    disk:
+      name: takolo-personal-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PERSONAL_DATA_DIR
+        value: /data
+      - key: PERSONAL_HTTPS
+        value: "1"
+      - key: PERSONAL_SETUP_TOKEN
+        generateValue: true
+      - key: WHATSAPP_SEND_ENABLED
+        value: "0"
+      - key: TAKOLO_REGISTRATION_OPEN
+        value: "1"
+      - key: TAKOLO_TRUST_PROXY
+        value: "1"

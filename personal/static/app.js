@@ -20,7 +20,35 @@ for (const form of document.querySelectorAll('[data-payment-form]')) {
   });
 }
 for (const form of document.querySelectorAll('[data-message-form]')) {
+  const recipients = [...form.querySelectorAll('input[name="clients"]')];
+  const balanceOnly = form.elements.balance_only;
+  const updateCount = () => {
+    const count = recipients.filter(input => input.checked).length;
+    form.querySelector('[data-recipient-count]').textContent = `${count} destinatarios seleccionados · máximo 50`;
+  };
+  form.querySelector('[data-select-recipients]').addEventListener('click', () => {
+    let count = 0;
+    for (const input of recipients) {
+      input.checked = !input.disabled && (!balanceOnly.checked || Number(input.dataset.balance) > 0) && count < 50;
+      if (input.checked) count++;
+    }
+    updateCount();
+  });
+  form.querySelector('[data-clear-recipients]').addEventListener('click', () => {
+    recipients.forEach(input => { input.checked = false; });
+    updateCount();
+  });
+  form.addEventListener('change', () => {
+    if (balanceOnly.checked) recipients.filter(input => Number(input.dataset.balance) <= 0).forEach(input => { input.checked = false; });
+    updateCount();
+  });
   form.addEventListener('submit', event => {
+    const count = recipients.filter(input => input.checked).length;
+    if (count < 1 || count > 50) {
+      event.preventDefault();
+      alert('Selecciona entre 1 y 50 destinatarios autorizados.');
+      return;
+    }
     if (form.elements.mode.value === 'live') {
       const count = form.querySelectorAll('input[name="clients"]:checked').length;
       if (!confirm(`¿Confirmas enviar un mensaje REAL a ${count} destinatarios por la API oficial de WhatsApp? El proveedor puede cobrar estos mensajes.`)) event.preventDefault();

@@ -164,6 +164,26 @@ class PostgresTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT balance_cents FROM clients').fetchone()[0],20000)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM events WHERE kind='payment'").fetchone()[0],1)
 
+    def test_scheduled_reminder_persists_and_cancels_after_settlement(self):
+        from datetime import datetime, timezone, timedelta
+        from zoneinfo import ZoneInfo
+        cid=self.add_client(balance='100')
+        self.post(f'/messages/consent/{cid}',{'granted':'yes','proof':'Consentimiento ficticio de prueba.'})
+        future=(datetime.now(timezone.utc)+timedelta(days=1)).astimezone(ZoneInfo('America/Mexico_City'))
+        data={'clients':[str(cid)],'mode':'test','request_key':secrets.token_urlsafe(24),'balance_only':'yes','send_at':future.strftime('%Y-%m-%dT%H:%M')}
+        self.post('/messages/queue',data);self.post('/messages/queue',data)
+        self.assertEqual(run_round(self.accounts,set()),0)
+        with self.workspace() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM message_jobs').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT require_balance FROM message_job_rules').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT state FROM message_jobs').fetchone()[0],'queued')
+        self.payment(cid,'100')
+        with self.workspace() as db:
+            db.execute("UPDATE message_jobs SET available_at='2000-01-01 00:00:00'");db.commit()
+        self.assertEqual(run_round(self.accounts,set(),transport=lambda *_:self.fail('Paid client contacted')),0)
+        with self.workspace() as db:
+            self.assertEqual(db.execute('SELECT state FROM message_jobs').fetchone()[0],'cancelled')
+
 
 class FreeHostingGuards(unittest.TestCase):
     def test_free_host_fails_without_remote_database(self):

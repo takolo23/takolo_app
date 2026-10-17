@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 from .accounts import connect
@@ -48,6 +49,10 @@ def init_schema(db):
         provider_id TEXT UNIQUE, detail TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0,
         available_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS message_queue ON message_jobs(state,available_at);
+    CREATE TABLE IF NOT EXISTS message_job_rules (
+        job_id INTEGER PRIMARY KEY REFERENCES message_jobs(id), require_balance INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS message_dispatches (
+        id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES message_jobs(id), started_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS message_receipts (
         provider_id TEXT PRIMARY KEY, state TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
     ''')
@@ -86,7 +91,8 @@ def process_one(db, transport=api, config=None, only_mode=None):
         db.rollback()
         return False
     consent = db.execute('SELECT * FROM message_consent WHERE client_id=?', (job['client_id'],)).fetchone()
-    client = db.execute('SELECT phone FROM clients WHERE id=?', (job['client_id'],)).fetchone()
+    client = db.execute('SELECT phone,balance_cents FROM clients WHERE id=?', (job['client_id'],)).fetchone()
+    rule = db.execute('SELECT require_balance FROM message_job_rules WHERE job_id=?', (job['id'],)).fetchone()
     try:
         current_phone = phone_number(client['phone'])
     except (ValueError, TypeError):
@@ -96,6 +102,8 @@ def process_one(db, transport=api, config=None, only_mode=None):
         reason = 'Envío cancelado: falta autorización vigente para este número.'
     elif job['mode'] == 'live' and not live_ready(config):
         reason = 'Envío cancelado: la conexión real no está habilitada o está incompleta.'
+    elif rule and rule['require_balance'] and client['balance_cents'] <= 0:
+        reason = 'Recordatorio cancelado: el cliente ya liquidó su saldo.'
     if reason:
         db.execute("UPDATE message_jobs SET state='cancelled',detail=?,updated_at=? WHERE id=?", (reason, stamp(), job['id']))
         db.commit()
@@ -104,6 +112,13 @@ def process_one(db, transport=api, config=None, only_mode=None):
         db.execute("UPDATE message_jobs SET state='simulated',detail='Simulación terminada; no se contactó a WhatsApp ni al destinatario.',updated_at=? WHERE id=?", (stamp(), job['id']))
         db.commit()
         return True
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    if db.execute('SELECT COUNT(*) FROM message_dispatches WHERE started_at>=?', (today,)).fetchone()[0] >= 50:
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime('%Y-%m-%d 00:00:00')
+        db.execute("UPDATE message_jobs SET available_at=?,detail='Límite diario alcanzado; pendiente para el siguiente día.',updated_at=? WHERE id=?", (tomorrow, stamp(), job['id']))
+        db.commit()
+        return True
+    db.execute('INSERT INTO message_dispatches(job_id,started_at) VALUES (?,?)', (job['id'], stamp()))
     db.execute("UPDATE message_jobs SET state='sending', attempts=attempts+1,updated_at=? WHERE id=?", (stamp(), job['id']))
     db.commit()
     state, detail, provider_id, available = 'failed', '', None, stamp()
@@ -230,6 +245,19 @@ def register_messaging(app, db, login_required):
         if not re.fullmatch(r'[A-Za-z0-9_-]{32}', key) or not ids or len(ids) > 50 or not all(i.isdigit() for i in ids):
             flash('Selecciona entre 1 y 50 clientes para esta prueba o envío.', 'error')
             return redirect(url_for('messaging.index'))
+        available = stamp()
+        scheduled = request.form.get('send_at', '').strip()
+        if scheduled:
+            try:
+                when = datetime.strptime(scheduled, '%Y-%m-%dT%H:%M').replace(tzinfo=ZoneInfo('America/Mexico_City')).astimezone(timezone.utc)
+                current = datetime.now(timezone.utc)
+                if not current < when <= current + timedelta(days=90):
+                    raise ValueError()
+                available = when.strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                flash('Elige una fecha futura dentro de los próximos 90 días, en horario de Ciudad de México.', 'error')
+                return redirect(url_for('messaging.index'))
+        balance_only = request.form.get('balance_only') == 'yes'
         connection = db()
         connection.execute('BEGIN IMMEDIATE')
         if mode == 'live':
@@ -248,6 +276,8 @@ def register_messaging(app, db, login_required):
                 phone = phone_number(client['phone'])
                 if not client['granted'] or client['consent_phone'] != phone:
                     raise ValueError(f"Falta autorización vigente: {client['name']}.")
+                if balance_only and client['balance_cents'] <= 0:
+                    raise ValueError(f"El cliente ya no tiene saldo pendiente: {client['name']}.")
                 if phone not in seen_phones:
                     prepared.append((client, phone))
                     seen_phones.add(phone)
@@ -260,7 +290,9 @@ def register_messaging(app, db, login_required):
             added = 0
             for client, phone in prepared:
                 cursor = connection.execute('INSERT OR IGNORE INTO message_jobs(client_id,request_key,phone,mode,template,language,parameter,state,available_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                                            (client['id'], key + ':' + str(client['id']), phone, mode, config['META_TEMPLATE_NAME'] or 'vista_previa', config['META_TEMPLATE_LANGUAGE'] or 'es_MX', client['name'], 'queued', stamp(), stamp(), stamp()))
+                                            (client['id'], key + ':' + str(client['id']), phone, mode, config['META_TEMPLATE_NAME'] or 'vista_previa', config['META_TEMPLATE_LANGUAGE'] or 'es_MX', client['name'], 'queued', available, stamp(), stamp()))
+                if cursor.rowcount:
+                    connection.execute('INSERT INTO message_job_rules(job_id,require_balance) VALUES (?,?)', (cursor.lastrowid, int(balance_only)))
                 added += cursor.rowcount
             connection.commit()
             flash(f'{added} mensajes agregados a la cola. ' + ('Son simulaciones: no se enviará nada.' if mode == 'test' else 'Se usará la plantilla aprobada configurada en Meta.'), 'success')

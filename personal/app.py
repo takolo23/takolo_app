@@ -473,6 +473,8 @@ def create_app(config=None):
                     db().execute('DELETE FROM stages WHERE id=?', (stage_id,))
                     db().commit()
                     flash(f'{added} clientes importados. {duplicates} referencias existentes omitidas; sus saldos y pagos se conservaron.', 'success')
+                    if request.form.get('after_import') == 'messages':
+                        return redirect(url_for('messaging.index'))
                     return redirect(url_for('clients'))
         return render_template('preview.html', stage=stage, data=payload, mapping=mapping, managers=managers)
 

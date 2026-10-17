@@ -88,6 +88,62 @@ class MessagingTests(unittest.TestCase):
             self.assertIsNone(job['provider_id'])
             self.assertEqual(job['attempts'],0)
 
+    def test_excel_to_scheduled_reminder_survives_restart_and_waits(self):
+        from datetime import datetime, timezone, timedelta
+        from zoneinfo import ZoneInfo
+        upload = self.client.post('/import', data={'csrf_token':self.token('/import'), 'file':(io.BytesIO(b'Nombre,Telefono,Saldo\nBeto,+525511112222,500\n'), 'cartera.csv')})
+        stage = upload.headers['Location']
+        result = self.post(stage, {'name':'Nombre','phone':'Telefono','balance':'Saldo','after_import':'messages'}, stage)
+        self.assertIn('Programa tus recordatorios', result.get_data(as_text=True))
+        with self.db() as db:
+            imported = db.execute("SELECT id FROM clients WHERE name='Beto'").fetchone()[0]
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM message_jobs').fetchone()[0],0)
+        self.post(f'/messages/consent/{imported}', {'granted':'yes','proof':'Consentimiento de prueba por formulario.'})
+        future = (datetime.now(timezone.utc) + timedelta(days=1)).astimezone(ZoneInfo('America/Mexico_City'))
+        form = {'clients':[str(imported)],'mode':'test','request_key':secrets.token_urlsafe(24),'send_at':future.strftime('%Y-%m-%dT%H:%M'),'balance_only':'yes'}
+        self.post('/messages/queue', form)
+        create_app({'TESTING': True, 'DATA_DIR':Path(self.temp.name),'SECRET_KEY':'test-only'})
+        with self.db() as db:
+            self.assertFalse(process_one(db, transport=lambda *_:self.fail('No real send')))
+            job = db.execute('SELECT * FROM message_jobs').fetchone()
+            self.assertEqual(job['available_at'], future.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:00'))
+            db.execute("UPDATE message_jobs SET available_at='2000-01-01 00:00:00'")
+            db.commit()
+            self.assertTrue(process_one(db, transport=lambda *_:self.fail('No real send')))
+            self.assertEqual(db.execute('SELECT state FROM message_jobs').fetchone()[0],'simulated')
+
+    def test_invalid_schedule_does_not_queue_any_message(self):
+        self.consent()
+        for value in ['invalid','2000-01-01T12:00','2999-01-01T12:00']:
+            response=self.post('/messages/queue', {'clients':[str(self.client_id)],'mode':'test','request_key':secrets.token_urlsafe(24),'send_at':value})
+            self.assertIn('Elige una fecha futura',response.get_data(as_text=True))
+        with self.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM message_jobs').fetchone()[0],0)
+
+    def test_settlement_cancels_pending_balance_reminder(self):
+        self.consent()
+        self.post('/messages/queue', {'clients':[str(self.client_id)],'mode':'test','request_key':secrets.token_urlsafe(24),'balance_only':'yes'})
+        with self.db() as db:
+            db.execute('UPDATE clients SET balance_cents=0'); db.commit()
+            self.assertTrue(process_one(db, transport=lambda *_:self.fail('Paid client contacted')))
+            self.assertEqual(db.execute('SELECT state FROM message_jobs').fetchone()[0],'cancelled')
+
+    def test_dispatch_limit_defers_without_contacting_provider(self):
+        self.consent()
+        with self.live_config():
+            self.queue(mode='live')
+            with self.db() as db:
+                job_id=db.execute('SELECT id FROM message_jobs').fetchone()[0]
+                from personal.messaging import stamp
+                for _ in range(50):
+                    db.execute('INSERT INTO message_dispatches(job_id,started_at) VALUES (?,?)',(job_id,stamp()))
+                db.commit()
+                self.assertTrue(process_one(db, transport=lambda *_:self.fail('Daily limit exceeded')))
+                job=db.execute('SELECT * FROM message_jobs').fetchone()
+                self.assertEqual(job['state'],'queued')
+                self.assertEqual(job['attempts'],0)
+                self.assertGreater(job['available_at'],stamp())
+
     def test_consent_is_required_and_invalid_phone_does_not_gain_permission(self):
         response=self.queue()
         self.assertIn('Falta autorización',response.get_data(as_text=True))

@@ -1,0 +1,41 @@
+[build]
+  base = "whatsapp-netlify"
+  command = "npm run build"
+  publish = "apps/web/dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--include=dev"
+  AWS_LAMBDA_JS_RUNTIME = "nodejs20.x"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["@prisma/client", "@prisma/adapter-pg", "pg"]
+
+[functions.queue]
+  schedule = "* * * * *"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store"

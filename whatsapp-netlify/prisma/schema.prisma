@@ -1,0 +1,423 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../apps/api/src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+  engineType             = "client"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+}
+
+enum SendingState {
+  ACTIVE
+  PAUSED
+  TOKEN_INVALID
+  ACCOUNT_RESTRICTED
+  LOW_QUALITY
+}
+
+enum ConsentAction {
+  GRANTED
+  WITHDRAWN
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum TemplateStatus {
+  APPROVED
+  PENDING
+  REJECTED
+  PAUSED
+  DISABLED
+  UNKNOWN
+}
+
+enum TemplateCategory {
+  MARKETING
+  UTILITY
+  AUTHENTICATION
+}
+
+enum MessageKind {
+  TEMPLATE
+  BOT_REPLY
+}
+
+enum MessageStatus {
+  QUEUED
+  PROCESSING
+  SIMULATED
+  ACCEPTED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  CANCELLED
+  UNKNOWN
+}
+
+enum AttemptOutcome {
+  STARTED
+  SIMULATED
+  ACCEPTED
+  RETRYABLE
+  FAILED
+  UNKNOWN
+}
+
+model Workspace {
+  id                    String       @id @default(cuid())
+  name                  String       @db.VarChar(100)
+  metaPhoneNumberId     String?      @unique @db.VarChar(64)
+  metaBusinessAccountId String?      @db.VarChar(64)
+  sendingState          SendingState @default(PAUSED)
+  pauseReason           String?      @db.VarChar(500)
+  pausedAt              DateTime?
+  dryRun                Boolean      @default(true)
+  messagesPerMinute     Int          @default(3)
+  version               Int          @default(0)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  memberships           Membership[]
+  contacts              Contact[]
+  tags                  Tag[]
+  segments              Segment[]
+  templates             Template[]
+  campaigns             Campaign[]
+  messages              OutboundMessage[]
+  inboundMessages       InboundMessage[]
+  consentEvents         ConsentEvent[]
+  botConfig             BotConfig?
+  auditEvents           AuditEvent[]
+  webhookEvents         WebhookEvent[]
+  rateBuckets           RateBucket[]
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique @db.VarChar(254)
+  name         String       @db.VarChar(100)
+  passwordHash String       @db.VarChar(255)
+  active       Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  memberships  Membership[]
+  sessions     Session[]
+}
+
+model Membership {
+  userId      String
+  workspaceId String
+  role        Role      @default(OPERATOR)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workspaceId])
+  @@index([workspaceId, role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique @db.VarChar(64)
+  csrfHash  String   @db.VarChar(64)
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model LoginThrottle {
+  key          String   @id @db.VarChar(64)
+  attempts     Int      @default(0)
+  windowEndsAt DateTime
+  blockedUntil DateTime?
+  updatedAt    DateTime @updatedAt
+
+  @@index([windowEndsAt])
+}
+
+model Contact {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  name             String   @db.VarChar(200)
+  phoneE164        String   @db.VarChar(16)
+  consentGranted   Boolean  @default(false)
+  consentGrantedAt DateTime?
+  consentSource    String?  @db.VarChar(500)
+  optedOutAt       DateTime?
+  lastInboundAt    DateTime?
+  customFields     Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  tags             ContactTag[]
+  consentEvents    ConsentEvent[]
+  messages         OutboundMessage[]
+  inboundMessages  InboundMessage[]
+
+  @@unique([workspaceId, phoneE164])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, name, id])
+  @@index([workspaceId, consentGranted, optedOutAt])
+}
+
+model ConsentEvent {
+  id          String        @id @default(cuid())
+  workspaceId String
+  contactId   String
+  action      ConsentAction
+  occurredAt  DateTime
+  source      String        @db.VarChar(500)
+  actorId     String?       @db.VarChar(64)
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  contact     Contact       @relation(fields: [workspaceId, contactId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@index([workspaceId, contactId, occurredAt])
+}
+
+model Tag {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String    @db.VarChar(80)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  contacts    ContactTag[]
+
+  @@unique([workspaceId, name])
+  @@unique([workspaceId, id])
+}
+
+model ContactTag {
+  workspaceId String
+  contactId   String
+  tagId       String
+  contact     Contact @relation(fields: [workspaceId, contactId], references: [workspaceId, id], onDelete: Cascade)
+  tag         Tag     @relation(fields: [workspaceId, tagId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@id([workspaceId, contactId, tagId])
+  @@index([workspaceId, tagId])
+}
+
+model Segment {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String    @db.VarChar(120)
+  filters     Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  campaigns   Campaign[]
+
+  @@unique([workspaceId, name])
+  @@unique([workspaceId, id])
+}
+
+model Template {
+  id                  String           @id @default(cuid())
+  workspaceId         String
+  metaId              String           @db.VarChar(64)
+  name                String           @db.VarChar(512)
+  language            String           @db.VarChar(20)
+  category            TemplateCategory
+  status              TemplateStatus   @default(UNKNOWN)
+  components          Json
+  variables           Json             @default("[]")
+  bodyText            String           @db.Text
+  optOutIncluded      Boolean          @default(false)
+  supported           Boolean          @default(false)
+  rejectionReason     String?          @db.VarChar(500)
+  syncedAt            DateTime         @default(now())
+  workspace           Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  campaigns           Campaign[]
+
+  @@unique([workspaceId, metaId])
+  @@unique([workspaceId, name, language])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, status])
+}
+
+model Campaign {
+  id                  String         @id @default(cuid())
+  workspaceId         String
+  segmentId           String
+  templateId          String
+  name                String         @db.VarChar(150)
+  status              CampaignStatus @default(DRAFT)
+  dryRun              Boolean        @default(true)
+  variableMapping     Json           @default("{}")
+  segmentSnapshot     Json           @default("{}")
+  templateSnapshot    Json           @default("{}")
+  scheduledAt         DateTime?
+  startedAt           DateTime?
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+  pausedAt            DateTime?
+  pauseReason         String?        @db.VarChar(500)
+  enrollmentCursor    String?        @db.VarChar(64)
+  enrollmentCompleted Boolean        @default(false)
+  createdBy           String         @db.VarChar(64)
+  version             Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  workspace           Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  segment             Segment        @relation(fields: [workspaceId, segmentId], references: [workspaceId, id], onDelete: Restrict)
+  template            Template       @relation(fields: [workspaceId, templateId], references: [workspaceId, id], onDelete: Restrict)
+  messages            OutboundMessage[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, status, scheduledAt])
+}
+
+model OutboundMessage {
+  id                     String        @id @default(cuid())
+  workspaceId            String
+  contactId              String
+  campaignId             String?
+  sourceInboundMessageId String?       @unique
+  idempotencyKey         String        @db.VarChar(160)
+  kind                   MessageKind
+  status                 MessageStatus @default(QUEUED)
+  phoneE164              String        @db.VarChar(16)
+  payload                Json
+  dryRun                 Boolean       @default(true)
+  providerMessageId      String?       @unique @db.VarChar(256)
+  nextAttemptAt          DateTime      @default(now())
+  expiresAt              DateTime
+  attempts               Int           @default(0)
+  claimToken             String?       @db.VarChar(64)
+  leaseExpiresAt         DateTime?
+  lastErrorCode          String?       @db.VarChar(64)
+  lastError              String?       @db.VarChar(1000)
+  acceptedAt             DateTime?
+  sentAt                 DateTime?
+  deliveredAt            DateTime?
+  readAt                 DateTime?
+  failedAt               DateTime?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  workspace              Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  contact                Contact       @relation(fields: [workspaceId, contactId], references: [workspaceId, id], onDelete: Restrict)
+  campaign               Campaign?     @relation(fields: [workspaceId, campaignId], references: [workspaceId, id], onDelete: Restrict)
+  sourceInboundMessage   InboundMessage? @relation(fields: [workspaceId, sourceInboundMessageId], references: [workspaceId, id], onDelete: Restrict)
+  dispatchAttempts       DispatchAttempt[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@unique([workspaceId, sourceInboundMessageId])
+  @@unique([campaignId, contactId])
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, status, leaseExpiresAt])
+  @@index([workspaceId, campaignId, status])
+}
+
+model DispatchAttempt {
+  id             String         @id @default(cuid())
+  messageId      String
+  number         Int
+  outcome        AttemptOutcome @default(STARTED)
+  startedAt      DateTime       @default(now())
+  finishedAt     DateTime?
+  httpStatus     Int?
+  errorCode      String?        @db.VarChar(64)
+  errorSubcode   String?        @db.VarChar(64)
+  errorMessage   String?        @db.VarChar(1000)
+  providerId     String?        @db.VarChar(256)
+  message        OutboundMessage @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, number])
+  @@index([errorCode, startedAt])
+}
+
+model InboundMessage {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  contactId         String
+  providerMessageId String    @unique @db.VarChar(256)
+  type              String    @db.VarChar(30)
+  text              String?   @db.Text
+  occurredAt        DateTime
+  receivedAt        DateTime  @default(now())
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  contact           Contact   @relation(fields: [workspaceId, contactId], references: [workspaceId, id], onDelete: Restrict)
+  automaticReply    OutboundMessage?
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, contactId, occurredAt])
+}
+
+model BotConfig {
+  workspaceId  String    @id
+  enabled      Boolean   @default(false)
+  greetingText String    @default("Hola. Gracias por escribirnos. Un asesor te atenderá pronto. Para dejar de recibir mensajes, responde BAJA.") @db.VarChar(4096)
+  cooldownSecs Int       @default(60)
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+}
+
+model WebhookEvent {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  deduplicationKey  String    @unique @db.VarChar(64)
+  providerMessageId String?   @db.VarChar(256)
+  type              String    @db.VarChar(40)
+  payload           Json
+  receivedAt        DateTime  @default(now())
+  processedAt       DateTime?
+  attempts          Int       @default(0)
+  nextAttemptAt     DateTime  @default(now())
+  lastError         String?   @db.VarChar(1000)
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([processedAt, nextAttemptAt])
+  @@index([workspaceId, providerMessageId])
+}
+
+model RateBucket {
+  workspaceId String
+  minute      DateTime
+  reserved    Int       @default(0)
+  expiresAt   DateTime
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, minute])
+  @@index([expiresAt])
+}
+
+model WorkerLease {
+  name      String   @id @db.VarChar(80)
+  token     String   @db.VarChar(64)
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+}
+
+model AuditEvent {
+  id          String    @id @default(cuid())
+  workspaceId String
+  actorId     String?   @db.VarChar(64)
+  action      String    @db.VarChar(100)
+  entityType  String    @db.VarChar(50)
+  entityId    String?   @db.VarChar(256)
+  requestId   String?   @db.VarChar(64)
+  details     Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, createdAt, id])
+  @@index([workspaceId, entityType, entityId])
+}

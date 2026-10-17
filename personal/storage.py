@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import ssl
 
 
 class SQLiteConnection(sqlite3.Connection):
@@ -80,7 +81,12 @@ class PostgresConnection:
         # Only isolated loopback test instances may use plaintext. Remote hosts
         # always verify the server certificate and hostname against system roots.
         if host not in {'localhost', '127.0.0.1', '::1'}:
-            options.update(sslmode='verify-full', sslrootcert='system')
+            # psycopg-binary bundles OpenSSL with build-machine default paths.
+            # Use Python's resolved system bundle rather than libpq's "system".
+            ca_bundle = ssl.get_default_verify_paths().cafile
+            if not ca_bundle:
+                raise RuntimeError('No se encontró el almacén de certificados TLS del sistema.')
+            options.update(sslmode='verify-full', sslrootcert=ca_bundle)
         self._db = psycopg.connect(**options, autocommit=True, connect_timeout=15, prepare_threshold=None)
         self._db.execute(sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(self.schema)))
 

@@ -111,4 +111,6 @@ TAKOLO_PG_TEST_URL=postgresql://postgres@127.0.0.1:55432/takolo_test /workspace/
 
 Las pruebas locales no sustituyen la comprobación de TLS, permisos, cuotas y persistencia en una base externa real después de conectarla.
 
+La conexión remota usa `verify-full` y el archivo de certificados resuelto por `ssl.get_default_verify_paths().cafile`. No usa `sslrootcert=system`: OpenSSL incluido en `psycopg-binary` puede buscar ese almacén en una ruta de la máquina donde se compiló. Si falta el archivo de confianza, la aplicación rechaza el arranque. Una prueba TLS con PostgreSQL aislado verificó conexión con CA válida y rechazo de certificados sin confianza o con otro nombre de servidor.
+
 Resultado de esta adaptación: 51 pruebas ejecutadas y aprobadas, incluida la base PostgreSQL real local. La imagen final arrancó con dos cuentas y se comprobó en navegador que borrar la carpeta local y reiniciar conserva usuarios, clientes, mensajes y conexiones cifradas. La prueba incluyó aislamiento, permisos, suspensión de sesiones y vista móvil. No se observó ningún error del servidor ni de JavaScript. Esto no acredita una conexión Neon real ni un despliegue público; ambos siguen pendientes de la cuenta externa del usuario.

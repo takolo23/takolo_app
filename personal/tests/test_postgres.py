@@ -181,7 +181,15 @@ class FreeHostingGuards(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'stop before network'):
                 connect('/tmp/accounts.sqlite3')
             self.assertEqual(driver.call_args.kwargs['sslmode'],'verify-full')
-            self.assertEqual(driver.call_args.kwargs['sslrootcert'],'system')
+            import ssl
+            self.assertEqual(driver.call_args.kwargs['sslrootcert'],ssl.get_default_verify_paths().cafile)
+
+    def test_remote_database_fails_closed_without_trusted_roots(self):
+        from types import SimpleNamespace
+        with patch.dict(os.environ,{'DATABASE_URL':'postgresql://test@example.invalid/db'}),patch('personal.storage.ssl.get_default_verify_paths',return_value=SimpleNamespace(cafile=None)),patch('psycopg.connect') as driver:
+            with self.assertRaisesRegex(RuntimeError,'certificados TLS'):
+                connect('/tmp/accounts.sqlite3')
+            driver.assert_not_called()
 
 
 if __name__=='__main__': unittest.main()
